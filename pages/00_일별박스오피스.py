@@ -12,16 +12,11 @@ st.title("🎬 박스오피스 대시보드")
 KOBIS_KEY = st.secrets.get("KOBIS_KEY", "")
 
 
-# KOBIS 영화 상세 정보 API를 통해 장르 및 태그 가져오는 함수
-@st.cache_data(ttl=86400)  # 하루 동안 장르 데이터 캐싱
-def get_movie_tags(movie_cd, audi_acc):
+# KOBIS 영화 상세 정보 API를 활용해 3~5개의 해시태그 생성하는 함수
+@st.cache_data(ttl=86400)  # 하루 동안 캐싱
+def get_movie_tags(movie_cd):
     tags = []
 
-    # 1. 누적관객수 100만 이상 태그
-    if audi_acc >= 1000000:
-        tags.append("#100만돌파")
-
-    # 2. KOBIS 영화 상세 API 요청 (장르 정보 가져오기)
     try:
         detail_url = "https://www.kobis.or.kr/kobisopenapi/webservice/rest/movie/searchMovieInfo.json"
         res = requests.get(
@@ -35,19 +30,56 @@ def get_movie_tags(movie_cd, audi_acc):
                 .get("movieInfoResult", {})
                 .get("movieInfo", {})
             )
-            genres = movie_info.get("genres", [])
 
-            # 장르 이름들을 #장르명 태그 형태로 변환 (최대 2개)
-            for g in genres[:2]:
-                genre_name = g.get("genreNm", "")
+            # 1. 장르 추출 (최대 3개)
+            genres = movie_info.get("genres", [])
+            for g in genres:
+                genre_name = g.get("genreNm", "").strip()
                 if genre_name:
                     tags.append(f"#{genre_name}")
+
+            # 2. 대표 제작 국가 추출
+            nations = movie_info.get("nations", [])
+            for n in nations:
+                nation_name = n.get("nationNm", "").strip()
+                if nation_name:
+                    tags.append(f"#{nation_name}")
+
+            # 3. 관람 등급 추출
+            audits = movie_info.get("audits", [])
+            if audits:
+                watch_grade = audits[0].get("watchGradeNm", "").strip()
+                if watch_grade:
+                    # '12세이상관람가' -> '12세관람가' 등으로 간결하게 다듬기
+                    clean_grade = watch_grade.replace("이상관람가", "관람가")
+                    tags.append(f"#{clean_grade}")
+
+            # 4. 러닝 타임(상영 시간) 추출
+            show_tm = movie_info.get("showTm", "").strip()
+            if show_tm and show_tm.isdigit():
+                tags.append(f"#{show_tm}분")
+
+            # 5. 감독 이름 추출 (태그 수가 부족할 경우를 대비)
+            directors = movie_info.get("directors", [])
+            if directors:
+                dir_name = directors[0].get("peopleNm", "").strip()
+                if dir_name:
+                    tags.append(f"#{dir_name}감독")
+
     except Exception:
         pass
 
-    # 태그가 하나도 없거나 실패 시 기본 태그
-    if not tags:
-        tags.append("#영화")
+    # 태그 개수를 최소 3개 ~ 최대 5개로 조정
+    # 정보가 부족해서 3개 미만일 경우 기본 태그 추가
+    fallback_tags = ["#개봉작", "#인기영화", "#박스오피스"]
+    for fallback in fallback_tags:
+        if len(tags) >= 3:
+            break
+        if fallback not in tags:
+            tags.append(fallback)
+
+    # 최대 5개까지만 자르기
+    tags = tags[:5]
 
     return " ".join(tags)
 
@@ -113,11 +145,9 @@ df["display_movieNm"] = df.apply(
     axis=1,
 )
 
-# 5. 해시태그 생성 (#장르 #100만돌파 등)
-with st.spinner("영화 태그 정보를 생성하는 중..."):
-    df["movie_tags"] = df.apply(
-        lambda row: get_movie_tags(row["movieCd"], row["audiAcc"]), axis=1
-    )
+# 5. 해시태그 생성 (최소 3개, 최대 5개)
+with st.spinner("영화별 해시태그 생성 중..."):
+    df["movie_tags"] = df["movieCd"].apply(get_movie_tags)
 
 # 1위 영화 상단 지표 카드
 top = df.sort_values("rank").iloc[0]
@@ -158,7 +188,9 @@ st.subheader(f"📋 {selected_date.strftime('%Y년 %m월 %d일')} 박스오피�
 st.dataframe(
     table,
     column_config={
-        "영화 태그": st.column_config.TextColumn("영화 태그", help="장르 및 영화 특징 해시태그"),
+        "영화 태그": st.column_config.TextColumn(
+            "영화 태그", help="장르, 국가, 등급, 러닝타임 등 상세 해시태그"
+        ),
         "관객수": st.column_config.NumberColumn(format="%d명"),
         "누적관객": st.column_config.NumberColumn(format="%d명"),
         "스크린수": st.column_config.NumberColumn(format="%d개"),
