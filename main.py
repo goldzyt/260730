@@ -36,18 +36,14 @@ def load_data():
     df_latest = df[df['연도'] == latest_year].copy()
     
     # 3) 65세 이상 인구 및 전체 인구 집계 준비
-    # '계_'로 시작하는 열 중 성별 합산 열들을 찾습니다.
     total_cols = [col for col in df.columns if col.startswith('계_')]
     
-    # 65세 이상에 해당하는 열만 선별합니다.
     senior_cols = []
     for col in total_cols:
-        # '계_100세 이상' 처리
         if col == '계_100세 이상':
             senior_cols.append(col)
             continue
         
-        # '계_0세' ~ '계_99세' 형태에서 숫자만 추출
         age_str = col.replace('계_', '').replace('세', '')
         if age_str.isdigit():
             if int(age_str) >= 65:
@@ -89,7 +85,7 @@ df_sigungu['고령화율_구간'] = pd.cut(
     right=False
 )
 
-# 4. 연파랑/구름 느낌의 5단계 그라데이션 색상 설정 (옅은 맑은 하늘색 -> 진한 바다/구름 그림자색)
+# 4. 연파랑/구름 느낌의 5단계 그라데이션 색상 설정
 color_discrete_map = {
     '19% 미만': '#E0F2FE',            # 매우 옅은 파스텔 하늘색 (구름 느낌)
     '19% 이상 ~ 23% 미만': '#BAE6FD',  # 부드러운 연파랑
@@ -119,8 +115,8 @@ fig = px.choropleth_mapbox(
         '고령화율': '고령화율(%)',
         '고령화율_구간': '고령화 비율 구간'
     },
-    center={"lat": 35.9, "lon": 127.8},  # 대한민국 중심 좌표
-    zoom=6.3,                           # 초기 확대/축소 비율
+    center={"lat": 35.6, "lon": 127.8},  # 제주도까지 잘 보이도록 중심 위도를 35.6으로 약간 하향
+    zoom=6.0,                           # 지도 잘림 방지를 위해 확대 비율을 6.0으로 조정
     mapbox_style="white-bg"             # 배경 지도 타일 없이 흰 바탕으로 설정
 )
 
@@ -132,7 +128,7 @@ fig.update_traces(
 
 fig.update_layout(
     margin={"r":0, "t":10, "l":0, "b":0},
-    height=680,
+    height=800,                         # 지도가 아래로 잘리지 않도록 높이를 800px로 확대
     legend_title_text='고령화율 구간',
     legend=dict(
         yanchor="top",
