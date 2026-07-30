@@ -11,6 +11,47 @@ st.title("🎬 박스오피스 대시보드")
 # 비밀 금고에서 KOBIS 인증키 꺼내기
 KOBIS_KEY = st.secrets.get("KOBIS_KEY", "")
 
+
+# KOBIS 영화 상세 정보 API를 통해 장르 및 태그 가져오는 함수
+@st.cache_data(ttl=86400)  # 하루 동안 장르 데이터 캐싱
+def get_movie_tags(movie_cd, audi_acc):
+    tags = []
+
+    # 1. 누적관객수 100만 이상 태그
+    if audi_acc >= 1000000:
+        tags.append("#100만돌파")
+
+    # 2. KOBIS 영화 상세 API 요청 (장르 정보 가져오기)
+    try:
+        detail_url = "https://www.kobis.or.kr/kobisopenapi/webservice/rest/movie/searchMovieInfo.json"
+        res = requests.get(
+            detail_url,
+            params={"key": KOBIS_KEY, "movieCd": movie_cd},
+            timeout=3,
+        )
+        if res.status_code == 200:
+            movie_info = (
+                res.json()
+                .get("movieInfoResult", {})
+                .get("movieInfo", {})
+            )
+            genres = movie_info.get("genres", [])
+
+            # 장르 이름들을 #장르명 태그 형태로 변환 (최대 2개)
+            for g in genres[:2]:
+                genre_name = g.get("genreNm", "")
+                if genre_name:
+                    tags.append(f"#{genre_name}")
+    except Exception:
+        pass
+
+    # 태그가 하나도 없거나 실패 시 기본 태그
+    if not tags:
+        tags.append("#영화")
+
+    return " ".join(tags)
+
+
 # 1. 날짜 선택기 설정 (최대 선택 가능 날짜: '어제')
 yesterday = (datetime.now(ZoneInfo("Asia/Seoul")) - timedelta(days=1)).date()
 
@@ -66,11 +107,17 @@ def format_rank_change(change):
 
 df["순위변동"] = df["rankInten"].apply(format_rank_change)
 
-# 4. 누적 관객수 100만 이상 트로피 표시
+# 4. 100만 관객 이상 트로피 표시
 df["display_movieNm"] = df.apply(
     lambda x: f"{x['movieNm']} 🏆" if x["audiAcc"] >= 1000000 else x["movieNm"],
     axis=1,
 )
+
+# 5. 해시태그 생성 (#장르 #100만돌파 등)
+with st.spinner("영화 태그 정보를 생성하는 중..."):
+    df["movie_tags"] = df.apply(
+        lambda row: get_movie_tags(row["movieCd"], row["audiAcc"]), axis=1
+    )
 
 # 1위 영화 상단 지표 카드
 top = df.sort_values("rank").iloc[0]
@@ -85,16 +132,19 @@ table = df[
         "rank",
         "순위변동",
         "display_movieNm",
+        "movie_tags",
         "openDt",
         "audiCnt",
         "audiAcc",
         "scrnCnt",
     ]
 ].copy()
+
 table.columns = [
     "순위",
     "순위 변동",
     "영화명",
+    "영화 태그",
     "개봉일",
     "관객수",
     "누적관객",
@@ -108,6 +158,7 @@ st.subheader(f"📋 {selected_date.strftime('%Y년 %m월 %d일')} 박스오피�
 st.dataframe(
     table,
     column_config={
+        "영화 태그": st.column_config.TextColumn("영화 태그", help="장르 및 영화 특징 해시태그"),
         "관객수": st.column_config.NumberColumn(format="%d명"),
         "누적관객": st.column_config.NumberColumn(format="%d명"),
         "스크린수": st.column_config.NumberColumn(format="%d개"),
@@ -116,7 +167,7 @@ st.dataframe(
     hide_index=True,
 )
 
-# 5. 관객수 상위 5편 파이 차트
+# 6. 관객수 상위 5편 파이 차트
 st.subheader("📈 관객수 상위 5편 비율")
 top5 = table.sort_values("관객수", ascending=False).head(5)
 
